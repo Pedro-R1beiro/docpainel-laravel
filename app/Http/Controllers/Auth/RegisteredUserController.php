@@ -17,9 +17,13 @@ class RegisteredUserController extends Controller
     /**
      * Display the registration view.
      */
-    public function create(): View
+    public function create($role = 'client'): View
     {
-        return view('auth.register');
+        if (!in_array($role, ['client', 'sub-adm', 'adm'])) {
+            abort(404);
+        }
+
+        return view('auth.register', ['role' => $role]);
     }
 
     /**
@@ -29,17 +33,39 @@ class RegisteredUserController extends Controller
      */
     public function store(Request $request): RedirectResponse
     {
-        $request->validate([
+        $role = !in_array($request->role, ['client', 'sub-adm', 'adm']) ? 'client' : $request->role;
+
+        $rules = [
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:'.User::class],
+            'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:' . User::class],
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
-        ]);
+        ];
+
+        if (in_array($role, ['sub-adm', 'adm'])) {
+            $rules['secret_password'] = ['required'];
+        }
+
+        $request->validate($rules);
+
+
+        if (in_array($role, ['sub-adm', 'adm'])) {
+            $passwords = [
+                'adm' => env('ADM_SECRET'),
+                'sub-adm' => env('SUBADM_SECRET')
+            ];
+
+            if ($request->secret_password !== $passwords[$role]) {
+                return back()->withErrors(['secret_password' => 'Invalid secret password']);
+            }
+        }
 
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
         ]);
+
+        $user->assignRole($role);
 
         event(new Registered($user));
 
